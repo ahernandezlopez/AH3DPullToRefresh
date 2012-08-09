@@ -65,8 +65,14 @@
         [self performSelector:@selector(dataDidRetrieve:) withObject:newRows afterDelay:2.0];
     }];
     
-    // Customization of the pull refresh view (optional)
-    
+    // Customization of the pull refresh view (optional). Uncomment to try ;-)
+//    [_tableView setPullToRefreshViewBackgroundColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
+//    [[_tableView pullToRefreshLabel] setTextColor:[UIColor colorWithWhite:1.0 alpha:1.0]];
+//    [_tableView setPullToRefreshViewActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
+//    [_tableView setPullToRefreshViewLoadedText:@"Locked and loaded!"];
+//    [_tableView setPullToRefreshViewLoadingText:@"Let me think..."];
+//    [_tableView setPullToRefreshViewPullingText:@"A little bit more..."];
+//    [_tableView setPullToRefreshViewReleaseText:@"NOW!"];
 }
 
 - (void)viewDidUnload {
