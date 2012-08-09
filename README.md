@@ -28,7 +28,7 @@ I created this component just to try with Objective-C runtime's associated objec
 
 ## Non-ARC ##
 
-This project does NOT use ARC. If you are not using ARC in your project, add '-fno-objc-arc' as a compiler flag for UIScrollView+AH3DPullRefresh.m
+This project does NOT use ARC. If you are using ARC in your project, add '-fno-objc-arc' as a compiler flag for UIScrollView+AH3DPullRefresh.m
 
 ## To-do ##
 
