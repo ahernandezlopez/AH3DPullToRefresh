@@ -41,5 +41,5 @@ Thanks to the code inspiration from SVPullToRefresh (http://github.com/samvermet
 
 ## Contact ##
 
-- Twitter: [twitter.com/ahernandezlopez](@ahernandezlopez)
-- E-mail: [mailto:albert.hernandez@gmail.com](albert.hernandez@gmail.com)
+- Twitter: [@ahernandezlopez](http://twitter.com/ahernandezlopez)
+- E-mail: [albert.hernandez@gmail.com](mailto:albert.hernandez@gmail.com)
