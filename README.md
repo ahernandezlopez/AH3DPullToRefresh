@@ -21,7 +21,6 @@ I created this component just to try with Objective-C runtime's associated objec
 4) Set a handler to the table view that will be fired when the pull refresh view is triggered:
 
 	[_tableView setPullToRefreshHandler:^{
-        
 		// Handler code: WebService call, CoreData fetch,...
     }]; 
 
