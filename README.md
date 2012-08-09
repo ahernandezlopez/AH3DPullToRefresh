@@ -2,7 +2,7 @@
 
 AH3DPullRefresh is a simple iOS control to add a pull to refresh to UITableView with a cool 3D effect.
 
-<img src="Screenshots/animation.gif" alt="Animated screenshot! :P"/>
+<img src="https://github.com/ahernandezlopez/AH3DPullToRefresh/blob/master/Screenshots/animation.gif" alt="Animated screenshot! :P"/>
 
 ## Overview ##
 
@@ -36,7 +36,7 @@ This project does NOT use ARC. If you are not using ARC in your project, add '-f
 
 ## Credits ##
 
-Thanks to the code inspiration from [github.com/samvermette/SVPullToRefresh]SVPullToRefresh](SVPullToRefresh) by [github.com/samvermette](Sam Vernette) and [http://b2cloud.com.au/how-to-guides/ios-perspective-transform](this B2Cloud post) from [http://b2cloud.com.au/author/tom](Tom).
+Thanks to the code inspiration from SVPullToRefresh (http://github.com/samvermette/SVPullToRefresh) by Sam Vernette and http://b2cloud.com.au/how-to-guides/ios-perspective-transform by Tom from B2Cloud.
 
 ## Contact ##
 
