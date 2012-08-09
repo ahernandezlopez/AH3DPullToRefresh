@@ -2,7 +2,7 @@
 
 AH3DPullRefresh is a simple iOS control to add a pull to refresh to UITableView with a cool 3D effect.
 
-https://github.com/ahernandezlopez/AH3DPullToRefresh/blob/master/Screenshots/animation.gif
+![Animated screenshot :-)](/Screenshots/animation.gif)
 
 ## Overview ##
 
