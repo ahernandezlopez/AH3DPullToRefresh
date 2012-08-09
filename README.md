@@ -13,7 +13,9 @@ I created this component just to try with Objective-C runtime's associated objec
 ## Usage ##
 
 1) Copy UIScrollView+AH3DPullRefresh.h & UIScrollView+AH3DPullRefresh.m into your folder.
+
 2) Add the framework QuartzCore.framework in order to be linked into your build
+
 3) Wherever you want to add the component to a UITableView:
 	
 	#import "UIScrollView+AH3DPullRefresh.h"
