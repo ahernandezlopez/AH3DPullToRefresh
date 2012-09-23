@@ -430,18 +430,15 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
     
     if (pullToRefreshHandler) {
         
-        // If it's loading adjust the content inset
-        if (_state == AHPullViewStateLoading || _state == AHPullViewStateLoadingProgramatically) {
+        // If it's loading do nothing
+        if (_state == AHPullViewStateLoading) {
             
-            CGFloat offset = MAX(_scrollView.contentOffset.y * -1, 0);
-            offset = MIN(offset, _originalScrollViewContentInset.top + kAHPullView_ViewHeight);
-            UIEdgeInsets edgeInsets = UIEdgeInsetsMake(offset, 0.0f, _scrollView.contentInset.bottom, 0.0f);
-            [self setScrollViewContentInset:edgeInsets];
+            // Do nothing
+        }
+        // If it was loaded programmatically force to layout to max fraction
+        else if (_state == AHPullViewStateLoadingProgramatically) {
             
-            // If it was loaded programmatically force to layout to max fraction
-            if (_state == AHPullViewStateLoadingProgramatically) {
-                [self layoutSubviewsToMaxFraction];
-            }
+            [self layoutSubviewsToMaxFraction];
         }
         else {
             
@@ -490,18 +487,15 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
         [self setFrame:CGRectMake(0, _scrollView.contentSize.height,//+CGRectGetHeight(self.frame)/2,
                                   CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
         
-        // If it's loading adjust the content inset
-        if (_state == AHPullViewStateLoading || _state == AHPullViewStateLoadingProgramatically) {
-
-            CGFloat offset = MAX(_scrollView.contentOffset.y, _scrollView.contentSize.height-_scrollView.frame.size.height);
-            offset = MIN(offset, _originalScrollViewContentInset.bottom + kAHPullView_ViewHeight);
-            UIEdgeInsets edgeInsets = UIEdgeInsetsMake(_scrollView.contentInset.top, 0.0f, offset, 0.0f);
-            [self setScrollViewContentInset:edgeInsets];
+        // If it's loading do nothing
+        if (_state == AHPullViewStateLoading) {
             
-            // If it was loaded programmatically force to layout to max fraction
-            if (_state == AHPullViewStateLoadingProgramatically) {
-                [self layoutSubviewsToMaxFraction];
-            }
+            // Do nothing
+        }
+        // If it was loaded programmatically force to layout to max fraction
+        else if (_state == AHPullViewStateLoadingProgramatically) {
+
+            [self layoutSubviewsToMaxFraction];
         }
         else {
             
@@ -574,14 +568,16 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
     
     // If pull to refresh is enabled increase the top inset with the upper frame position
     if (isPullToRefreshEnabled) {
-        
-        newInsets.top = newInsets.top - (kAHPullView_ViewHeight / 2);
+
+        CGFloat offset = _originalScrollViewContentInset.top + kAHPullView_ViewHeight;
+        newInsets.top = newInsets.top + offset;
     }
     
     // The same applies for pull to load more, but with the bottom inset
     if (isPullToLoadMoreEnabled) {
         
-        newInsets.bottom = newInsets.bottom + kAHPullView_ViewHeight;
+        CGFloat offset = _originalScrollViewContentInset.bottom + kAHPullView_ViewHeight;
+        newInsets.bottom = newInsets.bottom + offset;
     }
     
     return newInsets;
