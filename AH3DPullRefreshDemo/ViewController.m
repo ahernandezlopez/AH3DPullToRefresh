@@ -29,7 +29,8 @@
 
 @interface ViewController (Private)
 
-- (void)dataDidRetrieve:(NSArray *)data;
+- (void)dataDidRefresh:(NSArray *)data;
+- (void)dataDidLoadMore:(NSArray *)data;
 
 @end
 
@@ -62,17 +63,39 @@
         NSArray * newRows = [NSArray arrayWithObjects:
                              [kDataArray objectAtIndex:rand()%33],
                              [kDataArray objectAtIndex:rand()%33], nil];
-        [self performSelector:@selector(dataDidRetrieve:) withObject:newRows afterDelay:2.0];
+        [self performSelector:@selector(dataDidRefresh:) withObject:newRows afterDelay:5.0];
+    }];
+    
+    // Set the pull to laod more handler block
+    [_tableView setPullToLoadMoreHandler:^{
+        
+        /**
+         Note: Here you should deal perform a webservice request, CoreData query or 
+         whatever instead of this dummy code ;-)
+         */
+        NSArray * newRows = [NSArray arrayWithObjects:
+                             [kDataArray objectAtIndex:rand()%33],
+                             [kDataArray objectAtIndex:rand()%33], nil];
+        [self performSelector:@selector(dataDidLoadMore:) withObject:newRows afterDelay:5.0];
     }];
     
     // Customization of the pull refresh view (optional). Uncomment to try ;-)
-//    [_tableView setPullToRefreshViewBackgroundColor:[UIColor colorWithWhite:0.0 alpha:1.0]];
+//    [_tableView setPullToRefreshViewBackgroundColor:[UIColor colorWithRed:0.1 green:0.3 blue:1.0 alpha:1.0]];
 //    [[_tableView pullToRefreshLabel] setTextColor:[UIColor colorWithWhite:1.0 alpha:1.0]];
 //    [_tableView setPullToRefreshViewActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
 //    [_tableView setPullToRefreshViewLoadedText:@"Locked and loaded!"];
 //    [_tableView setPullToRefreshViewLoadingText:@"Let me think..."];
 //    [_tableView setPullToRefreshViewPullingText:@"A little bit more..."];
 //    [_tableView setPullToRefreshViewReleaseText:@"NOW!"];
+    
+    // Customization of the pull to load more view (optional). Uncomment to try ;-)
+//    [_tableView setPullToLoadMoreViewBackgroundColor:[UIColor colorWithRed:0.1 green:0.3 blue:1.0 alpha:1.0]];
+//    [[_tableView pullToLoadMoreLabel] setTextColor:[UIColor colorWithWhite:1.0 alpha:1.0]];
+//    [_tableView setPullToLoadMoreViewActivityIndicatorStyle:UIActivityIndicatorViewStyleWhite];
+//    [_tableView setPullToLoadMoreViewLoadedText:@"Locked and loaded!"];
+//    [_tableView setPullToLoadMoreViewLoadingText:@"Let me think..."];
+//    [_tableView setPullToLoadMoreViewPullingText:@"A little bit more..."];
+//    [_tableView setPullToLoadMoreViewReleaseText:@"NOW!"];
 }
 
 - (void)viewDidUnload {
@@ -107,6 +130,11 @@
     [_tableView pullToRefresh];
 }
 
+- (IBAction)loadMoreButtonPressed:(id)sender {
+    
+    [_tableView pullToLoadMore];
+}
+
 #pragma mark - UITableViewDataSource
 
 - (NSInteger)tableView:(UITableView *)tableView numberOfRowsInSection:(NSInteger)section {
@@ -138,7 +166,7 @@
 
 #pragma mark - Private methods
 
-- (void)dataDidRetrieve:(NSArray *)data {
+- (void)dataDidRefresh:(NSArray *)data {
     
     // Warn the table view that the refresh did finish
     [_tableView refreshFinished];
@@ -157,5 +185,45 @@
     [_tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:UITableViewRowAnimationFade];
     [indexPaths release];
 }
+
+- (void)dataDidLoadMore:(NSArray *)data {
+    
+//    // Warn the table view that the refresh did finish
+//    [_tableView loadMoreFinished];
+//    
+//    // Insert the objects at the first positions in the rows array
+//    NSIndexSet * indexSet = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(0, [data count])];
+//    [_rows insertObjects:data atIndexes:indexSet];
+//    
+//    // Obtain the index paths where to insert the rows in the table view
+//    NSMutableArray * indexPaths = [[NSMutableArray alloc] initWithCapacity:[data count]];
+//    for (NSUInteger i = 0; i < [data count]; i++) {
+//        [indexPaths addObject:[NSIndexPath indexPathForRow:i inSection:0]];
+//    }
+//    
+//    // Insert the new data in the table view
+//    [_tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:UITableViewRowAnimationFade];
+//    [indexPaths release];
+    
+    // Warn the table view that the refresh did finish
+    [_tableView loadMoreFinished];
+    
+    // Insert the objects at the first positions in the rows array
+    NSUInteger iniRowsCount = [_rows count];
+    NSIndexSet * indexSet = [NSIndexSet indexSetWithIndexesInRange:NSMakeRange(iniRowsCount, [data count])];
+    [_rows insertObjects:data atIndexes:indexSet];
+    
+    // Obtain the index paths where to insert the rows in the table view
+    NSMutableArray * indexPaths = [[NSMutableArray alloc] initWithCapacity:[data count]];
+    for (NSUInteger i = iniRowsCount; i < [_rows count]; i++) {
+        [indexPaths addObject:[NSIndexPath indexPathForRow:i inSection:0]];
+    }
+    
+    // Insert the new data in the table view
+    [_tableView insertRowsAtIndexPaths:indexPaths withRowAnimation:UITableViewRowAnimationFade];
+    [indexPaths release];
+
+}
+
 
 @end

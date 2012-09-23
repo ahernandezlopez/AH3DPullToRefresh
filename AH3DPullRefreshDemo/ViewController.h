@@ -31,5 +31,6 @@
 @property(nonatomic, retain) IBOutlet UITableView * tableView;
 
 - (IBAction)refreshButtonPressed:(id)sender;
+- (IBAction)loadMoreButtonPressed:(id)sender;
 
 @end

@@ -55,7 +55,8 @@ typedef enum {
 	AHPullViewStateVisible,                   // Visible but won't trigger the loading if the user releases
     AHPullViewStateTriggered,                 // If the user releases the scrollview it will load
     AHPullViewStateTriggeredProgramatically,  // When triggering it programmatically
-    AHPullViewStateLoading                    // Loading
+    AHPullViewStateLoading,                   // Loading
+    AHPullViewStateLoadingProgramatically     // Loading when triggered programatically
 } AHPullViewState;
 
 static CGFloat const kAHPullView_ViewHeight = 60.0;
@@ -78,7 +79,7 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
     UILabel * _label;                               // Where to display the texts depending on the state
     UIActivityIndicatorView * _activityIndicator;   // Shown while loading
     
-    NSString * _pullingText;
+    NSString * _pullingText;                        // Customization
     NSString * _releaseText;
     NSString * _loadingText;
     NSString * _loadedText;
@@ -93,7 +94,8 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 @property (nonatomic, retain) NSString * loadingText;       // Displayed in _label while loading
 @property (nonatomic, retain) NSString * loadedText;        // Displayed in _label when loading did finish
 
-@property (nonatomic, copy) void (^pullHandler)(void);      // The block executed when triggering
+@property (nonatomic, copy) void (^pullToRefreshHandler)(void);   // The block executed when triggering pull refresh
+@property (nonatomic, copy) void (^pullToLoadMoreHandler)(void);  // The block executed when triggering pull load more
 
 /**
  Initializes the view with the linked scrollview.
@@ -136,12 +138,24 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 
 - (void)scrollViewDidScroll:(CGPoint)contentOffset;
 - (void)setScrollViewContentInset:(UIEdgeInsets)contentInset;
+- (UIEdgeInsets)scrollViewContentInset;
 - (void)setState:(AHPullViewState)state;
 - (void)layoutSubviews:(NSTimer *)timer;
 
-- (void)pullAfterScrollToTop;
+- (void)pullAfterProgrammaticScroll;
+- (void)layoutSubviewsToMaxFraction;
 
 @end
+
+// --------------------------------------------------------------------------------
+#pragma mark - [Interface] AHTableView (Private)
+
+@interface UIScrollView (AHTableViewPrivate)
+
+@property (nonatomic, assign) BOOL isPullToRefreshEnabled;
+@property (nonatomic, assign) BOOL isPullToLoadMoreEnabled;
+
+@end 
 
 // --------------------------------------------------------------------------------
 #pragma mark - AHPullToRefreshView
@@ -157,7 +171,8 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 @synthesize loadingText = _loadingText;
 @synthesize loadedText = _loadedText;
 
-@synthesize pullHandler;
+@synthesize pullToRefreshHandler;
+@synthesize pullToLoadMoreHandler;
 
 #pragma mark - View lifecycle
 
@@ -198,7 +213,7 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
     self.loadingText = nil;
     self.loadedText = nil;
     
-    self.pullHandler = nil;
+    self.pullToRefreshHandler = nil;
     
     [super dealloc];
 }
@@ -207,7 +222,7 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 
 - (void)pullToRefresh {
 
-    // If the it's actually loading we avoid loading again
+    // If the it's actually loading or being pulled we avoid loading
     if (_state != AHPullViewStateHidden) {
         return;
     }
@@ -215,10 +230,12 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
     // Stop observing scrollview
     [self stopObservingScrollView];
     
-    // Scroll to top
-    [_scrollView scrollRectToVisible:CGRectMake(0, 0, CGRectGetWidth([_scrollView frame]), CGRectGetHeight([_scrollView frame])) animated:YES];
+    // If pull to load more is not enabled then scroll to top
+    BOOL isPullToLoadMoreEnabled = [_scrollView isPullToLoadMoreEnabled];
+    if (!isPullToLoadMoreEnabled) {
+        [_scrollView scrollRectToVisible:CGRectMake(0, 0, CGRectGetWidth([_scrollView frame]), CGRectGetHeight([_scrollView frame])) animated:YES];
+    }
 
-    
     // Set the state to triggered programmatically
     [self setState:AHPullViewStateTriggeredProgramatically];
     
@@ -227,14 +244,40 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
         
     // The delay to prevent overlapping animations. It will be between 0.1 and 0.5 seconds
     CGFloat delay = MAX(MIN(_scrollView.contentOffset.y/CGRectGetHeight([_scrollView frame]),0.1),0.5);
-    [self performSelector:@selector(pullAfterScrollToTop) withObject:nil afterDelay:delay];
+    [self performSelector:@selector(pullAfterProgrammaticScroll) withObject:nil afterDelay:delay];    
+}
+
+- (void)pullToLoadMore {
     
+    // If the it's actually loading or being pulled we avoid loading
+    if (_state != AHPullViewStateHidden) {
+        return;
+    }
+    
+    // Stop observing scrollview
+    [self stopObservingScrollView];
+    
+    // If pull to refresh is not enabled then scroll to bottom
+    BOOL isPullToRefreshEnabled = [_scrollView isPullToRefreshEnabled];
+    if (!isPullToRefreshEnabled) {
+        CGRect rect = CGRectMake(0, _scrollView.contentSize.height - CGRectGetHeight([_scrollView frame]), CGRectGetWidth([_scrollView frame]), CGRectGetHeight([_scrollView frame]));
+        [_scrollView scrollRectToVisible:rect animated:YES];
+    }
+    
+    // Set the state to triggered programmatically
+    [self setState:AHPullViewStateTriggeredProgramatically];
+    
+    // If it's triggered programatically avoid the user interaction
+    [_scrollView setScrollEnabled:NO];
+    
+    // The delay to prevent overlapping animations. It will be between 0.1 and 0.5 seconds
+    CGFloat delay = MAX(MIN(_scrollView.contentOffset.y/_scrollView.contentSize.height,0.1),0.5);
+    [self performSelector:@selector(pullAfterProgrammaticScroll) withObject:nil afterDelay:delay];
 }
 
 - (void)refreshFinished {
     
     // Set the state to hidden with a delay
-    // Note: if called programatically quickly has a visual bug that the unfolding of the 3d view remains stuck. That's why there's a delay.
     AHPullViewState state = AHPullViewStateHidden;
     SEL selector = @selector(setState:);
     NSMethodSignature *ms = [self methodSignatureForSelector:selector];
@@ -242,20 +285,65 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 	[invocation setTarget:self];
 	[invocation setSelector:selector];
 	[invocation setArgument:&state atIndex:2];
-	[invocation performSelector:@selector(invoke) withObject:nil afterDelay:0.3];
+    
+    // Note: if called programatically quickly has a visual bug that the unfolding of the 3d view remains stuck. That's why there's a delay.
+    if (_state == AHPullViewStateLoadingProgramatically) {
+        [invocation performSelector:@selector(invoke) withObject:nil afterDelay:0.3];
+    }
+    else {
+        [invocation performSelector:@selector(invoke) withObject:nil afterDelay:0.0];
+    }
+    
+    // Apply an alpha anim to the view
+    [UIView animateWithDuration:0.3 
+                     animations:^{[_scrollView pullToLoadMoreView].alpha = 0;}
+                     completion:^(BOOL finished){ if (finished) { [_scrollView pullToLoadMoreView].alpha = 1;}}];
     
     // Show the user the scroll indicators
     [_scrollView performSelector:@selector(flashScrollIndicators) withObject:nil afterDelay:0.35];
 }
 
-- (void)setPullHandler:(void (^)(void))handler {
+- (void)setPullToRefreshHandler:(void (^)(void))handler {
     
-    [pullHandler release];
-    pullHandler = [handler copy];
+    [pullToRefreshHandler release];
+    pullToRefreshHandler = [handler copy];
     
     // UI setup
     [_scrollView addSubview:self];
     [_scrollView sendSubviewToBack:self];
+    
+    _backgroundView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+    [_backgroundView.layer setAnchorPoint:CGPointMake(0.5, 1.0)];
+    [self.layer addSublayer:_backgroundView.layer];
+    
+    _shadowView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+    [_shadowView.layer setAnchorPoint:CGPointMake(0.5, 1.0)];
+    [self.layer addSublayer:_shadowView.layer];
+    
+    _label = [[UILabel alloc] initWithFrame:[_backgroundView frame]];
+    _label.text = _loadedText;
+    _label.font = [UIFont boldSystemFontOfSize:14];
+    [_label setTextAlignment:UITextAlignmentCenter];
+    _label.backgroundColor = [UIColor clearColor];
+    _label.textColor = [UIColor darkGrayColor];
+    [_label setCenter:_backgroundView.center];    
+    [self addSubview:_label];
+    
+    _activityIndicator = [[UIActivityIndicatorView alloc] initWithActivityIndicatorStyle:UIActivityIndicatorViewStyleGray];
+    _activityIndicator.hidesWhenStopped = YES;
+    [self addSubview:_activityIndicator];
+    
+    // Set the state to hidden
+    [self setState:AHPullViewStateHidden];
+}
+
+- (void)setPullToLoadMoreHandler:(void (^)(void))handler {
+    
+    [pullToLoadMoreHandler release];
+    pullToLoadMoreHandler = [handler copy];
+    
+    // UI setup
+    [_scrollView addSubview:self];
     
     _backgroundView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
     [_backgroundView.layer setAnchorPoint:CGPointMake(0.5, 1.0)];
@@ -340,15 +428,20 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
  */
 - (void)scrollViewDidScroll:(CGPoint)contentOffset {
     
-    if (pullHandler) {
+    if (pullToRefreshHandler) {
         
         // If it's loading adjust the content inset
-        if (_state == AHPullViewStateLoading) {
+        if (_state == AHPullViewStateLoading || _state == AHPullViewStateLoadingProgramatically) {
             
             CGFloat offset = MAX(_scrollView.contentOffset.y * -1, 0);
             offset = MIN(offset, _originalScrollViewContentInset.top + kAHPullView_ViewHeight);
-            UIEdgeInsets edgeInsets = UIEdgeInsetsMake(offset, 0.0f, 0.0f, 0.0f);
-            [_scrollView setContentInset:edgeInsets];
+            UIEdgeInsets edgeInsets = UIEdgeInsetsMake(offset, 0.0f, _scrollView.contentInset.bottom, 0.0f);
+            [self setScrollViewContentInset:edgeInsets];
+            
+            // If it was loaded programmatically force to layout to max fraction
+            if (_state == AHPullViewStateLoadingProgramatically) {
+                [self layoutSubviewsToMaxFraction];
+            }
         }
         else {
             
@@ -362,12 +455,16 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
             CGFloat contentOffsetY = contentOffset.y;
             BOOL scrollViewIsDragging = [_scrollView isDragging];
             
-            if ((_state == AHPullViewStateTriggered || _state == AHPullViewStateTriggeredProgramatically) && 
+            if (_state == AHPullViewStateTriggered && 
                 !scrollViewIsDragging) {
                 
                 [self setState:AHPullViewStateLoading];
             }
-            else if (_state != AHPullViewStateLoading &&
+            else if (_state == AHPullViewStateTriggeredProgramatically) {
+                
+                [self setState:AHPullViewStateLoadingProgramatically];
+            }
+            else if ((_state != AHPullViewStateLoading && _state != AHPullViewStateLoadingProgramatically) &&
                      scrollViewIsDragging &&
                      contentOffsetY > scrollOffsetYThreshold &&
                      contentOffsetY < - _originalScrollViewContentInset.top) {
@@ -387,14 +484,74 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
             }
         }
     }
+    else if (pullToLoadMoreHandler) {
+
+        // Adjust the frame when scrolling
+        [self setFrame:CGRectMake(0, _scrollView.contentSize.height,//+CGRectGetHeight(self.frame)/2,
+                                  CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        
+        // If it's loading adjust the content inset
+        if (_state == AHPullViewStateLoading || _state == AHPullViewStateLoadingProgramatically) {
+
+            CGFloat offset = MAX(_scrollView.contentOffset.y, _scrollView.contentSize.height-_scrollView.frame.size.height);
+            offset = MIN(offset, _originalScrollViewContentInset.bottom + kAHPullView_ViewHeight);
+            UIEdgeInsets edgeInsets = UIEdgeInsetsMake(_scrollView.contentInset.top, 0.0f, offset, 0.0f);
+            [self setScrollViewContentInset:edgeInsets];
+            
+            // If it was loaded programmatically force to layout to max fraction
+            if (_state == AHPullViewStateLoadingProgramatically) {
+                [self layoutSubviewsToMaxFraction];
+            }
+        }
+        else {
+            
+            // Layout subviews when the view is becoming visible (to make the 3D transform happens)
+            if (_state == AHPullViewStateVisible) {
+                [self layoutSubviews];
+            }
+            
+            // Set the state depending on the current state, if the user is dragging and the content y offset
+            CGFloat scrollOffsetYThreshold = _scrollView.contentSize.height - _scrollView.frame.size.height;
+            CGFloat contentOffsetY = contentOffset.y;
+            BOOL scrollViewIsDragging = [_scrollView isDragging];
+                        
+            if (_state == AHPullViewStateTriggered && 
+                !scrollViewIsDragging) {
+                
+                [self setState:AHPullViewStateLoading];
+            }
+            else if (_state == AHPullViewStateTriggeredProgramatically) {
+                
+                [self setState:AHPullViewStateLoadingProgramatically];
+            }
+            else if ((_state != AHPullViewStateLoading && _state != AHPullViewStateLoadingProgramatically) &&
+                     scrollViewIsDragging &&
+                     contentOffsetY > scrollOffsetYThreshold &&
+                     contentOffsetY < scrollOffsetYThreshold + self.frame.size.height) {
+                
+                [self setState:AHPullViewStateVisible];
+            }
+            else if (_state == AHPullViewStateVisible &&
+                     scrollViewIsDragging &&
+                     contentOffsetY > scrollOffsetYThreshold) {
+                
+                [self setState:AHPullViewStateTriggered];
+            }
+            else if (_state != AHPullViewStateHidden && 
+                     contentOffsetY <= scrollOffsetYThreshold) {
+                
+                [self setState:AHPullViewStateHidden];
+            }
+        }
+    }
 }
 
 /**
- Sets the scroll view content inset.
+ Sets the scroll view content inset considering if pull refresh and/or load more is enabled.
  @param the scroll view content inset.
  */
 - (void)setScrollViewContentInset:(UIEdgeInsets)contentInset {
-
+    
     [UIView animateWithDuration:0.3
                           delay:0
                         options:UIViewAnimationOptionAllowUserInteraction|UIViewAnimationOptionBeginFromCurrentState 
@@ -405,62 +562,132 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 }
 
 /**
+ Calculates the scroll view's content offset depending on if the pull refresh and/or the pull to load more is enabled.
+ @return the scroll view's content offset.
+ */
+- (UIEdgeInsets)scrollViewContentInset {
+    
+    BOOL isPullToRefreshEnabled = [_scrollView isPullToRefreshEnabled];
+    BOOL isPullToLoadMoreEnabled = [_scrollView isPullToLoadMoreEnabled];
+
+    UIEdgeInsets newInsets = _originalScrollViewContentInset;
+    
+    // If pull to refresh is enabled increase the top inset with the upper frame position
+    if (isPullToRefreshEnabled) {
+        
+        newInsets.top = newInsets.top - (kAHPullView_ViewHeight / 2);
+    }
+    
+    // The same applies for pull to load more, but with the bottom inset
+    if (isPullToLoadMoreEnabled) {
+        
+        newInsets.bottom = newInsets.bottom + kAHPullView_ViewHeight;
+    }
+    
+    return newInsets;
+}
+
+/**
  Sets the current state applying the corresponding UI updates.
  */
 - (void)setState:(AHPullViewState)state {
-
-    if (pullHandler) {
-        [self setScrollViewContentInset:_originalScrollViewContentInset];
-    } 
     
     if (_state == state)
         return;
     
     _state = state;
     
-    if (pullHandler) {
-        switch (_state) {
-            case AHPullViewStateHidden:
-                [_label setText:_loadedText];
-                [_activityIndicator stopAnimating];
-                [self setScrollViewContentInset:_originalScrollViewContentInset];
-                break;
-                
-            case AHPullViewStateVisible:
-                [_label setText:_pullingText];
-                [self setScrollViewContentInset:_originalScrollViewContentInset];
-                break;
-                
-            case AHPullViewStateTriggered:
-                [_label setText:_releaseText];
-                break;
+    
+    switch (_state) {
+        case AHPullViewStateHidden:
             
-            case AHPullViewStateTriggeredProgramatically:
-                // Do nothing
-                break;
+            // Notify the scrollview
+            if (pullToRefreshHandler) {
                 
-            case AHPullViewStateLoading:
-            {
-                // Change the position of the activity indicator
-                CGSize textSize = [_loadingText sizeWithFont:[_label font]];
-                CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
-                [_activityIndicator setCenter:activityIndicatorCenter];
-                [_label setText:_loadingText];
+                [_scrollView setIsPullToRefreshEnabled:NO];
+            }
+            else if (pullToLoadMoreHandler) {
                 
-                // Start animating the activity indicator
-                [_activityIndicator startAnimating];
+                [_scrollView setIsPullToLoadMoreEnabled:NO];
+            }
+            
+            // Update the UI
+            [_label setText:_loadedText];
+            [_activityIndicator stopAnimating];
+
+            // Adjust the content inset
+            UIEdgeInsets contentInset = [self scrollViewContentInset];
+            [self setScrollViewContentInset:contentInset];
+            break;
+            
+        case AHPullViewStateVisible:
+            
+            // Update the UI
+            [_label setText:_pullingText];
+            break;
+            
+        case AHPullViewStateTriggered:
+            
+            // Update the UI
+            [_label setText:_releaseText];
+            break;
+            
+        case AHPullViewStateTriggeredProgramatically:
+            
+            // Do nothing
+            break;
+            
+        case AHPullViewStateLoading:
+        case AHPullViewStateLoadingProgramatically:
+        {   
+            // Change the position of the activity indicator
+            CGSize textSize = [_loadingText sizeWithFont:[_label font]];
+            CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
+            [_activityIndicator setCenter:activityIndicatorCenter];
+            [_label setText:_loadingText];
+            
+            // Start animating the activity indicator
+            [_activityIndicator startAnimating];
+            
+            if (pullToRefreshHandler) {
+                
+                // Notify the scrollview
+                [_scrollView setIsPullToRefreshEnabled:YES];
                 
                 // Set the new scrollview insets
-                UIEdgeInsets newInsets = _originalScrollViewContentInset;
-                newInsets.top = self.frame.origin.y*-1+_originalScrollViewContentInset.top;
-                newInsets.bottom = _scrollView.contentInset.bottom;
-                [self setScrollViewContentInset:newInsets];
-                [_scrollView setContentOffset:CGPointMake(0, -self.frame.size.height) animated:YES];
-
+                UIEdgeInsets contentInset = [self scrollViewContentInset];
+                [self setScrollViewContentInset:contentInset];
+                
+                // If pull to load more is not enabled, then set content offset to top
+                BOOL isPullToLoadMoreEnabled = [_scrollView isPullToLoadMoreEnabled];
+                if (!isPullToLoadMoreEnabled) {
+                    
+                    [_scrollView setContentOffset:CGPointMake(0, -self.frame.size.height) animated:YES];
+                }
+                
                 // Execute the pull handler block
-                pullHandler();
-                break;
+                pullToRefreshHandler();
             }
+            else if (pullToLoadMoreHandler) {
+                
+                // Notify the scrollview
+                [_scrollView setIsPullToLoadMoreEnabled:YES];
+                
+                // Set the new scrollview insets
+                UIEdgeInsets contentInset = [self scrollViewContentInset];
+                [self setScrollViewContentInset:contentInset];
+
+                // If pull to refresh is not enabled, then set content offset to bottom
+                BOOL isPullToRefreshEnabled = [_scrollView isPullToRefreshEnabled];
+                if (!isPullToRefreshEnabled) {
+                    
+                    [_scrollView setContentOffset:CGPointMake(0, _scrollView.contentSize.height - CGRectGetHeight([_scrollView frame])+ self.frame.size.height) animated:YES];
+                }
+                
+                // Execute the pull handler block
+                pullToLoadMoreHandler();
+            }
+            break;
         }
     }
 }
@@ -475,9 +702,9 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 }
 
 /**
- Called when pull refresh is called programatically, after scrolling the scrollview to top.
+ Called when pull refresh or pull load more is called programatically, after scrolling respectively the scrollview to top or to bottom.
  */
-- (void)pullAfterScrollToTop {
+- (void)pullAfterProgrammaticScroll {
     
     // Start observing
     [self startObservingScrollView];
@@ -486,12 +713,77 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
     [_scrollView setScrollEnabled:YES];
     
     // Set the state to loading
-    [self setState:AHPullViewStateLoading];
+    [self setState:AHPullViewStateLoadingProgramatically];
     
     // Force layout subview while performing the 3d animation
-    NSTimer * timer = [NSTimer scheduledTimerWithTimeInterval:0.001 target:self selector:@selector(layoutSubviews:) userInfo:nil repeats:YES];
-    [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSDefaultRunLoopMode];
-    [timer performSelector:@selector(invalidate) withObject:nil afterDelay:0.5];
+    BOOL isTheOtherPullViewEnabled = NO;
+    if (pullToRefreshHandler) {
+        isTheOtherPullViewEnabled = [_scrollView isPullToLoadMoreEnabled];
+    }
+    else if (pullToLoadMoreHandler) {
+        isTheOtherPullViewEnabled = [_scrollView isPullToRefreshEnabled];
+    }
+    
+    // If the other pull view is not enabled then layout the subviews during 0.5s
+    if (!isTheOtherPullViewEnabled) {
+
+        NSTimer * timer = [NSTimer scheduledTimerWithTimeInterval:0.001 target:self selector:@selector(layoutSubviews:) userInfo:nil repeats:YES];
+        [[NSRunLoop currentRunLoop] addTimer:timer forMode:NSDefaultRunLoopMode];
+        [timer performSelector:@selector(invalidate) withObject:nil afterDelay:0.5];
+    }
+}
+
+/**
+ Forces the layout subviews to the max fraction.
+ */
+- (void)layoutSubviewsToMaxFraction {
+    
+    [super layoutSubviews];
+    
+    if (self.pullToRefreshHandler) {
+        
+        // Subviews repositioning
+        [_backgroundView setFrame:CGRectMake(0, -kAHPullView_ViewHeight/2, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_shadowView setFrame:CGRectMake(0, -kAHPullView_ViewHeight/2, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_label setFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        CGSize textSize = [_loadingText sizeWithFont:[_label font]];
+        CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
+        [_activityIndicator setCenter:activityIndicatorCenter];
+        
+        // Aply the perspective transform
+        CATransform3D transform = CATransform3DMakePerspective(0, 0);
+        [_backgroundView.layer setTransform:transform];
+        [_shadowView.layer setTransform:transform];
+        
+        // Set the backgroundView color
+        [_backgroundView setBackgroundColor:_backgroundColor];
+        
+        // Calculate the alpha/brightness of the view and subviews' color with a min of 0.5
+        [_shadowView setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.0]];    
+    }
+    else if (self.pullToLoadMoreHandler) {
+        
+        // Subviews repositioning
+        [_backgroundView setFrame:CGRectMake(0, -kAHPullView_ViewHeight, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_shadowView setFrame:CGRectMake(0, -kAHPullView_ViewHeight, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_label setFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        CGSize textSize = [_loadingText sizeWithFont:[_label font]];
+        CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
+        [_activityIndicator setCenter:activityIndicatorCenter];
+        
+        // Apply the perspective transform
+        CATransform3D transform = CATransform3DIdentity;
+        transform = CATransform3DRotate(transform, M_PI, 1, 0, 0);
+        [_backgroundView.layer setTransform:transform];
+        [_label.layer setTransform:CATransform3DMakeRotation(M_PI, 1, 0, 0)];
+        [_shadowView.layer setTransform:transform];
+        
+        // Set the backgroundView color
+        [_backgroundView setBackgroundColor:_backgroundColor];
+        
+        // Calculate the alpha/brightness of the view and subviews' color with a min of 0.5
+        [_shadowView setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:0.0]];
+    }
 }
 
 #pragma mark - UIView overrides
@@ -520,29 +812,60 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 
     [super layoutSubviews];
     
-    // Subviews repositioning
-    [_backgroundView setFrame:CGRectMake(0, -kAHPullView_ViewHeight/2, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
-    [_shadowView setFrame:CGRectMake(0, -kAHPullView_ViewHeight/2, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
-    [_label setFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
-    CGSize textSize = [_loadingText sizeWithFont:[_label font]];
-    CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
-    [_activityIndicator setCenter:activityIndicatorCenter];
-    
-    // Calculate the offset percentage (considering the height of this view * 2)
-    CGFloat fraction = ((CGRectGetMinY(self.frame)*2 - _scrollView.contentOffset.y) / CGRectGetMinY(self.frame));
-    fraction = MIN(MAX(fraction,0),1);
-    
-    // Aply the perspective transform
-    CATransform3D transform = CATransform3DMakePerspective(0, 0.01 * -fraction);
-    [_backgroundView.layer setTransform:transform];
-    [_shadowView.layer setTransform:transform];
-    
-    // Set the backgroundView color
-    [_backgroundView setBackgroundColor:_backgroundColor];
-    
-    // Calculate the alpha/brightness of the view and subviews' color with a min of 0.5
-    CGFloat alpha = MIN(fraction,0.5);
-    [_shadowView setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:alpha]];    
+    if (self.pullToRefreshHandler) {
+
+        // Subviews repositioning
+        [_backgroundView setFrame:CGRectMake(0, -kAHPullView_ViewHeight/2, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_shadowView setFrame:CGRectMake(0, -kAHPullView_ViewHeight/2, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_label setFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        CGSize textSize = [_loadingText sizeWithFont:[_label font]];
+        CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
+        [_activityIndicator setCenter:activityIndicatorCenter];
+        
+        // Calculate the offset percentage (considering the height of this view * 2)
+        CGFloat fraction = ((CGRectGetMinY(self.frame)*2 - _scrollView.contentOffset.y) / CGRectGetMinY(self.frame));
+        fraction = MIN(MAX(fraction,0),1);
+        
+        // Aply the perspective transform
+        CATransform3D transform = CATransform3DMakePerspective(0, 0.01 * -fraction);
+        [_backgroundView.layer setTransform:transform];
+        [_shadowView.layer setTransform:transform];
+        
+        // Set the backgroundView color
+        [_backgroundView setBackgroundColor:_backgroundColor];
+        
+        // Calculate the alpha/brightness of the view and subviews' color with a min of 0.5
+        CGFloat alpha = MIN(fraction,0.5);
+        [_shadowView setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:alpha]];    
+    }
+    else if (self.pullToLoadMoreHandler) {
+
+        // Subviews repositioning
+        [_backgroundView setFrame:CGRectMake(0, -kAHPullView_ViewHeight, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_shadowView setFrame:CGRectMake(0, -kAHPullView_ViewHeight, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        [_label setFrame:CGRectMake(0, 0, CGRectGetWidth(_scrollView.frame), CGRectGetHeight(self.frame))];
+        CGSize textSize = [_loadingText sizeWithFont:[_label font]];
+        CGPoint activityIndicatorCenter = CGPointMake([_label center].x - textSize.width/2 - CGRectGetWidth([_activityIndicator frame]), [_label center].y);
+        [_activityIndicator setCenter:activityIndicatorCenter];
+        
+        // Calculate the offset percentage (considering the height of this view * 2)
+        CGFloat fraction = (CGRectGetMinY(self.frame) - CGRectGetHeight(_scrollView.frame) - _scrollView.contentOffset.y) / CGRectGetHeight(self.frame);
+        fraction = MIN(MAX(1+fraction,0),1);
+        
+        // Apply the perspective transform
+        CATransform3D transform = CATransform3DMakePerspective(0, 0.01 * fraction);
+        transform = CATransform3DRotate(transform, M_PI, 1, 0, 0);
+        [_backgroundView.layer setTransform:transform];
+        [_label.layer setTransform:CATransform3DMakeRotation(M_PI, 1, 0, 0)];
+        [_shadowView.layer setTransform:transform];
+        
+        // Set the backgroundView color
+        [_backgroundView setBackgroundColor:_backgroundColor];
+        
+        // Calculate the alpha/brightness of the view and subviews' color with a min of 0.5
+        CGFloat alpha = MIN(fraction,0.5);
+        [_shadowView setBackgroundColor:[UIColor colorWithWhite:0.0 alpha:alpha]];
+    }
 }
 
 #pragma mark - KVO
@@ -562,40 +885,64 @@ static CGFloat const kAHPullView_ViewHeight = 60.0;
 @end
 
 // --------------------------------------------------------------------------------
-#pragma mark - [Interface] AHTableView (Private)
-
-@interface UIScrollView (AHTableViewPrivate)
-
-@property (nonatomic, assign) BOOL isPullToRefreshEnabled;
-
-@end 
-
-// --------------------------------------------------------------------------------
 #pragma mark - AHTableView
 
 static char kAHTV_Key_PullToRefreshView;
 static char kAHTV_Key_IsPullRefreshEnabled;
+static char kAHTV_Key_PullToLoadMoreView;
+static char kAHTV_Key_IsPullLoadMoreEnabled;
 
 @implementation UIScrollView (AH3DPullRefresh)
 
 @dynamic pullToRefreshView;
+@dynamic pullToLoadMoreView;
 
 #pragma mark - Public methods
+
+#pragma mark > Init
+
+- (void)setPullToRefreshHandler:(void (^)(void))handler {
+    
+    // If the view is nil, then it's created
+    if (!self.pullToRefreshView) {
+        
+        self.pullToRefreshView = [[[AHPullToRefreshView alloc] initWithScrollView:self] autorelease];
+    }
+    
+    [self.pullToRefreshView setPullToRefreshHandler:handler];
+}
+
+- (void)setPullToLoadMoreHandler:(void (^)(void))handler {
+    
+    // If the view is nil, then it's created
+    if (!self.pullToLoadMoreView) {
+        
+        self.pullToLoadMoreView = [[[AHPullToRefreshView alloc] initWithScrollView:self] autorelease];
+    }
+    
+    [self.pullToLoadMoreView setPullToLoadMoreHandler:handler];
+}
 
 #pragma mark > Actions
 
 - (void)pullToRefresh {
     
-    if (self.pullToRefreshView) {
-        [self.pullToRefreshView pullToRefresh];
-    }
+    [self.pullToRefreshView pullToRefresh];
+}
+
+- (void)pullToLoadMore {
+    
+    [self.pullToLoadMoreView pullToLoadMore];
 }
 
 - (void)refreshFinished {
     
-    if (self.pullToRefreshView) {
-        [self.pullToRefreshView refreshFinished];
-    }
+    [self.pullToRefreshView refreshFinished];
+}
+
+- (void)loadMoreFinished {
+    
+    [self.pullToLoadMoreView refreshFinished];
 }
 
 #pragma mark > Customization
@@ -635,23 +982,44 @@ static char kAHTV_Key_IsPullRefreshEnabled;
     [self.pullToRefreshView setLoadedText:loadedText];
 }
 
-#pragma mark > Dynamic Ivars Getters/Setters
-
-- (void)setPullToRefreshHandler:(void (^)(void))handler {
-
-    // If the pull to refresh view is nil, then it's created
-    if (!self.pullToRefreshView) {
-        
-        self.pullToRefreshView = [[[AHPullToRefreshView alloc] initWithScrollView:self] autorelease];
-    }
+- (UILabel *)pullToLoadMoreLabel {
     
-    [self.pullToRefreshView setPullHandler:handler];
+    return [self.pullToLoadMoreView label];
 }
 
-- (void)setPullToRefreshView:(AHPullToRefreshView *)aView {
+- (void)setPullToLoadMoreViewBackgroundColor:(UIColor *)backgroundColor {
     
-    BOOL isEnabled = aView ? YES : NO;
-    [self setIsPullToRefreshEnabled:isEnabled];
+    [self.pullToLoadMoreView setBackgroundColor:backgroundColor];
+}
+
+- (void)setPullToLoadMoreViewActivityIndicatorStyle:(UIActivityIndicatorViewStyle)style {
+    
+    [self.pullToLoadMoreView setActivityIndicatorStyle:style];
+}
+
+- (void)setPullToLoadMoreViewPullingText:(NSString *)pullingText {
+    
+    [self.pullToLoadMoreView setPullingText:pullingText];
+}
+
+- (void)setPullToLoadMoreViewReleaseText:(NSString *)releaseText {
+    
+    [self.pullToLoadMoreView setReleaseText:releaseText];
+}
+
+- (void)setPullToLoadMoreViewLoadingText:(NSString *)loadingText {
+    
+    [self.pullToLoadMoreView setLoadingText:loadingText];
+}
+
+- (void)setPullToLoadMoreViewLoadedText:(NSString *)loadedText {
+    
+    [self.pullToLoadMoreView setLoadedText:loadedText];
+}
+
+#pragma mark > Dynamic Ivars Getters/Setters
+
+- (void)setPullToRefreshView:(AHPullToRefreshView *)aView {
     
     objc_setAssociatedObject(self, &kAHTV_Key_PullToRefreshView, aView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 }
@@ -659,6 +1027,16 @@ static char kAHTV_Key_IsPullRefreshEnabled;
 - (AHPullToRefreshView *)pullToRefreshView {
     
     return objc_getAssociatedObject(self, &kAHTV_Key_PullToRefreshView);
+}
+
+- (void)setPullToLoadMoreView:(AHPullToRefreshView *)aView {
+        
+    objc_setAssociatedObject(self, &kAHTV_Key_PullToLoadMoreView, aView, OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+- (AHPullToRefreshView *)pullToLoadMoreView {
+    
+    return objc_getAssociatedObject(self, &kAHTV_Key_PullToLoadMoreView);
 }
 
 @end
@@ -669,6 +1047,7 @@ static char kAHTV_Key_IsPullRefreshEnabled;
 @implementation UIScrollView (AHTableViewPrivate)
 
 @dynamic isPullToRefreshEnabled;
+@dynamic isPullToLoadMoreEnabled;
 
 #pragma mark - Getters/Setters
 
@@ -680,6 +1059,16 @@ static char kAHTV_Key_IsPullRefreshEnabled;
 - (BOOL)isPullToRefreshEnabled {
     
     return [objc_getAssociatedObject(self, &kAHTV_Key_IsPullRefreshEnabled) boolValue];
+}
+
+- (void)setIsPullToLoadMoreEnabled:(BOOL)enabled {
+    
+    objc_setAssociatedObject(self, &kAHTV_Key_IsPullLoadMoreEnabled, [NSNumber numberWithBool:enabled], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
+}
+
+- (BOOL)isPullToLoadMoreEnabled {
+    
+    return [objc_getAssociatedObject(self, &kAHTV_Key_IsPullLoadMoreEnabled) boolValue];
 }
 
 @end
